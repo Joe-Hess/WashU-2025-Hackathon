@@ -1,350 +1,153 @@
 import streamlit as st
-from openai import OpenAI
-import os
-import numpy as np
 import requests
-import json
-import time
-import random
 from bs4 import BeautifulSoup
-import re
+from urllib.parse import quote
+import os
 
-# Page config
-
-st.set_page_config(
-page_title="GapFindr.AI",
-layout="wide"
-)
+# -----------------------------
+# PAGE CONFIG
+# -----------------------------
+st.set_page_config(page_title="Research Gap Finder", layout="wide")
 
 # Load external CSS
-
-def load_css(file_name):
-    """Load CSS from external file"""
-    try:
-        with open(file_name) as f:
-            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
-    except FileNotFoundError:
-        st.error(f"CSS file '{file_name}' not found. Using default styles.")
-
-load_css('styles.css')
-
-# Initialize OpenAI client
-
-try:
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-except Exception as e:
-    st.error("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
-    st.stop()
-
-# Cache functions to save API calls
-
-@st.cache_data(show_spinner=False)
-def get_embedding(text):
-    """Generate embedding with caching"""
-    try:
-        response = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=text
-        )
-        return response.data[0].embedding
-    except Exception as e:
-        st.error(f"Embedding error: {str(e)}")
-        return None
-
-@st.cache_data(show_spinner=False)
-def get_batch_embeddings(texts):
-    """Generate embeddings for multiple texts efficiently"""
-    try:
-        response = client.embeddings.create(
-            model="text-embedding-3-small",
-            input=texts
-        )
-        return [item.embedding for item in response.data]
-    except Exception as e:
-        st.error(f"Batch embedding error: {str(e)}")
-        return None
-
-@st.cache_data(show_spinner=False)
-def search_semantic_scholar(query, limit=10):
-    """Search Semantic Scholar API for similar papers"""
-    short_query = query[:200] if len(query) > 200 else query
-    try:
-        time.sleep(0.5)
-        url = "https://api.semanticscholar.org/graph/v1/paper/search"
-        params = {
-            "query": short_query,
-            "limit": limit,
-            "fields": "title,abstract,url,authors,year,venue,paperId"
-        }
-        headers = {"User-Agent": "GapFindr.AI Research Tool (Educational Hackathon Project)"}
-        response = requests.get(url, params=params, headers=headers, timeout=20)
-        
-        if response.status_code == 429:
-            st.error("**Rate Limited**: Semantic Scholar API is temporarily unavailable. Please wait a few minutes.")
-            return None
-        if response.status_code == 400:
-            st.error("**Invalid Query**: Try rephrasing or being more specific.")
-            return None
-        if response.status_code != 200:
-            st.error(f"**API Error** (Status {response.status_code})")
-            return None
-
-        data = response.json()
-        if not data.get("data"):
-            st.warning("No papers found. Try a broader query or enable Demo Mode.")
-            return None
-
-        papers = []
-        for paper in data.get("data", [])[:limit]:
-            if paper.get("abstract") and len(paper["abstract"]) > 50:
-                papers.append({
-                    "title": paper.get("title", "No title"),
-                    "abstract": paper.get("abstract", "No abstract available"),
-                    "url": paper.get("url", ""),
-                    "authors": [author.get("name", "") for author in paper.get("authors", [])[:5]],
-                    "year": paper.get("year", ""),
-                    "venue": paper.get("venue", ""),
-                    "paperId": paper.get("paperId", ""),
-                    "embedding": None
-                })
-        return papers
-    except Exception as e:
-        st.error(f"**Error**: {str(e)}")
-        return None
-
-@st.cache_data(show_spinner=False)
-def analyze_gaps(user_abstract, related_summaries):
-    """Generate gap analysis with caching"""
-    try:
-        prompt = f"""You are an academic research assistant analyzing research gaps.
-
-Given this research abstract:
-{user_abstract}
-
-And these related papers:
-{related_summaries}
-
-Provide:
-
-1. **Three Research Gaps** - Specific areas not adequately covered
-2. **Two Research Directions** - Novel approaches or combinations worth exploring
-
-Format your response clearly with headers and bullet points."""
-        result = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
-        )
-        return result.choices[0].message.content
-    except Exception as e:
-        st.error(f"Analysis error: {str(e)}")
-        return None
+with open("styles.css") as f:
+    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 # -----------------------------
-
-# PubMed-based QuickScan Mode (no OpenAI)
-
+# FUNCTIONS
 # -----------------------------
 
-def fetch_pubmed_abstracts(query, max_results=8):
-    """Fetch abstracts from PubMed API"""
-    base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
-    search_url = f"{base_url}esearch.fcgi?db=pubmed&term={query}&retmax={max_results}&retmode=json"
-    res = requests.get(search_url).json()
-    ids = ",".join(res.get("esearchresult", {}).get("idlist", []))
+@st.cache_data(show_spinner=False)
+def extract_keywords(text, top_k=5):
+    """Extract key topic terms from user input."""
+    import re
+    from collections import Counter
+    words = re.findall(r'\b\w+\b', text.lower())
+    words = [w for w in words if len(w) > 3]
+    common = Counter(words).most_common(top_k)
+    return [w for w, _ in common]
+
+
+@st.cache_data(show_spinner=False)
+def search_pubmed(query, retmax=7):
+    """Search PubMed and return abstracts, DOIs, and attempt to extract limitations."""
+    base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+    search_url = f"{base}esearch.fcgi?db=pubmed&term={quote(query)}&retmax={retmax}&retmode=json"
+    res = requests.get(search_url)
+    ids = res.json().get("esearchresult", {}).get("idlist", [])
     if not ids:
         return []
-    fetch_url = f"{base_url}efetch.fcgi?db=pubmed&id={ids}&retmode=xml"
-    data = requests.get(fetch_url).text
-    soup = BeautifulSoup(data, "xml")
-    abstracts = []
-    for article in soup.find_all("PubmedArticle"):
-        title = article.find("ArticleTitle").text if article.find("ArticleTitle") else ""
-        abstract = article.find("AbstractText").text if article.find("AbstractText") else ""
-        if abstract:
-            abstracts.append({"title": title, "abstract": abstract})
-    return abstracts
 
-def extract_limitations(text):
-    """Find sentences that indicate limitations"""
-    sentences = re.split(r'(?<=[.!?]) +', text)
-    keywords = ["limitation", "future work", "further research", "did not", "cannot", "bias", "small sample"]
-    limit_sents = [s for s in sentences if any(kw in s.lower() for kw in keywords)]
-    return limit_sents
+    ids_str = ",".join(ids)
+    fetch_url = f"{base}efetch.fcgi?db=pubmed&id={ids_str}&retmode=xml"
+    xml = requests.get(fetch_url).text
+    soup = BeautifulSoup(xml, "xml")
 
-def summarize_limitations(limitations):
-    """Naive summary of recurring limitation themes"""
-    if not limitations:
-        return "No explicit limitations found — may require deeper text analysis."
-    joined = " ".join(limitations)
-    return f"Common limitation themes: {joined[:400]}..."
+    articles = []
+    for a in soup.find_all("PubmedArticle"):
+        title = a.ArticleTitle.text if a.ArticleTitle else "No Title"
+        abstract = a.Abstract.text if a.Abstract else "No Abstract"
+        year_tag = a.find("PubDate")
+        year = year_tag.Year.text if year_tag and year_tag.Year else "N/A"
+
+        # Extract DOI and PMC ID
+        doi, pmc_id = None, None
+        for id_elem in a.find_all("ArticleId"):
+            if id_elem.get("IdType") == "doi":
+                doi = id_elem.text
+            elif id_elem.get("IdType") == "pmc":
+                pmc_id = id_elem.text
+
+        # Fetch limitations if open-access full text available
+        limitations_text = "Limitations not found in abstract or available full text."
+        if pmc_id:
+            pmc_fetch_url = f"{base}efetch.fcgi?db=pmc&id={pmc_id}&retmode=xml"
+            pmc_xml = requests.get(pmc_fetch_url).text
+            pmc_soup = BeautifulSoup(pmc_xml, "xml")
+            full_text = pmc_soup.get_text(" ", strip=True)
+            if "limitation" in full_text.lower():
+                sentences = [s for s in full_text.split(". ") if "limitation" in s.lower()]
+                limitations_text = ". ".join(sentences[:3]) + "."
+
+        elif doi:
+            limitations_text = f"Full text may be available at: [https://doi.org/{doi}](https://doi.org/{doi})"
+
+        articles.append({
+            "title": title,
+            "abstract": abstract,
+            "year": year,
+            "doi": doi,
+            "pmc_id": pmc_id,
+            "limitations": limitations_text
+        })
+
+    return articles
+
+
+def generate_research_gap_analysis(user_text, articles):
+    """Use Gemini to identify how user's research fits within current landscape."""
+    import google.generativeai as genai
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return "Missing GEMINI_API_KEY. Please add it as an environment variable."
+
+    genai.configure(api_key=api_key)
+
+    prompt = f"""
+    Analyze the following research abstract within its scientific context.
+
+    USER ABSTRACT:
+    {user_text}
+
+    EXISTING STUDIES:
+    {[a['abstract'] for a in articles]}
+
+    TASKS:
+    1. Explain how this abstract fits within the current research landscape.
+    2. Identify recurring or notable limitations across the referenced papers.
+    3. Suggest how the user's proposed study could advance or refine scientific understanding.
+    """
+
+    try:
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"Error generating analysis: {str(e)}"
+
 
 # -----------------------------
-
-# DEMO DATA (fallback)
-
+# STREAMLIT APP LAYOUT
 # -----------------------------
+st.markdown("<h1 class='main-header'>Research Gap Finder</h1>", unsafe_allow_html=True)
+st.markdown("<p class='subtitle'>Explore PubMed literature, uncover study limitations, and identify how your research can move science forward.</p>", unsafe_allow_html=True)
 
-DEMO_PAPERS = [
-    {
-        "title": "Machine Learning for Healthcare Diagnostics",
-        "abstract": "We explore ML algorithms applied to medical diagnosis and prediction of patient outcomes. Our work demonstrates significant improvements in diagnostic accuracy using deep learning approaches on medical imaging data.",
-        "url": "https://arxiv.org/abs/1234.5678",
-        "authors": ["John Smith", "Jane Doe", "Alice Johnson"],
-        "year": "2023",
-        "venue": "Nature Medicine",
-        "embedding": None
-    },
-    {
-        "title": "Deep Learning Approaches in Natural Language Processing",
-        "abstract": "This paper studies deep learning methods for NLP tasks including sentiment analysis and translation. We introduce novel transformer architectures that achieve state-of-the-art results across multiple benchmarks.",
-        "url": "https://arxiv.org/abs/2345.6789",
-        "authors": ["Bob Wilson", "Carol Martinez"],
-        "year": "2024",
-        "venue": "ACL",
-        "embedding": None
-    }
-]
+user_input = st.text_area("Enter your research abstract or idea:", placeholder="Paste your abstract here...", height=200)
 
-# -----------------------------
+if st.button("Analyze Research Landscape"):
+    if not user_input.strip():
+        st.warning("Please enter an abstract or topic to begin.")
+        st.stop()
 
-# MAIN APP
+    with st.spinner("Extracting key concepts and searching PubMed..."):
+        keywords = extract_keywords(user_input)
+        query = " AND ".join(keywords)
+        articles = search_pubmed(query)
 
-# -----------------------------
-
-st.markdown('<h1 class="main-header">GapFindr.AI</h1>', unsafe_allow_html=True)
-st.markdown("<p class='subtitle'>Illuminate the unexplored. Discover what's missing in your field.</p>", unsafe_allow_html=True)
-
-
-# --- QuickScan Section (no OpenAI) ---
-
-st.markdown("### 🧠 Quick Literature Scan (No API Key Needed)")
-topic_query = st.text_input("Enter a topic (e.g., Parkinson's Disease):", "")
-
-if st.button("⚡ Quick Scan for Limitations", use_container_width=True):
-    if not topic_query.strip():
-        st.warning("Please enter a topic first.")
+    st.markdown("<h2>Existing Research Results</h2>", unsafe_allow_html=True)
+    if not articles:
+        st.info("No PubMed results found for this query.")
     else:
-        with st.spinner("Fetching abstracts and scanning for limitations..."):
-            papers = fetch_pubmed_abstracts(topic_query)
-            if not papers:
-                st.error("No papers found. Try a broader topic.")
-            else:
-                all_limits = []
-                for p in papers:
-                    limits = extract_limitations(p["abstract"])
-                    all_limits.extend(limits)
-                summary = summarize_limitations(all_limits)
-                
-                st.subheader("Summary of Common Limitations")
-                st.write(summary)
+        for i, a in enumerate(articles, 1):
+            with st.expander(f"{i}. {a['title']} ({a['year']})"):
+                st.markdown(f"<div class='paper-card'><strong>Abstract:</strong> {a['abstract']}</div>", unsafe_allow_html=True)
+                if a['doi']:
+                    st.markdown(f"**DOI:** [https://doi.org/{a['doi']}](https://doi.org/{a['doi']})")
+                st.markdown(f"<div class='insight-box'><strong>Limitations:</strong> {a['limitations']}</div>", unsafe_allow_html=True)
 
-                st.subheader("Analyzed Papers")
-                for p in papers:
-                    st.markdown(f"**{p['title']}**")
-                    st.caption(p['abstract'])
-                    limits = extract_limitations(p["abstract"])
-                    if limits:
-                        st.write("Limitations:")
-                        for l in limits:
-                            st.write(f"- {l}")
-                    st.markdown("---")
-
-st.markdown("<hr>", unsafe_allow_html=True)
-
-# --- Full Gap Analysis Section ---
-
-user_abstract = st.text_area(
-"✦ Your Research Abstract",
-placeholder="Paste your paper abstract here to discover research gaps and related work...",
-height=200,
-)
-
-use_demo_mode = st.checkbox("🎯 Use Demo Mode (recommended for hackathon if API fails)", value=False)
-
-if st.button("🔍 Find Research Gaps", type="primary", use_container_width=True):
-    if not user_abstract.strip():
-        st.warning("⚠️ Please enter an abstract first!")
-    else:
-        with st.spinner("📖 Analyzing your manuscript..."):
-            user_embedding = get_embedding(user_abstract)
-            if user_embedding is None:
-                st.error("Embedding failed. Check your API key.")
-                st.stop()
-
-        similar_papers = None
-        if not use_demo_mode:
-            with st.spinner("🔍 Searching academic databases..."):
-                similar_papers = search_semantic_scholar(user_abstract, limit=8)
-
-        if similar_papers is None or use_demo_mode:
-            if not use_demo_mode:
-                st.info("Using demo papers. Enable Demo Mode to skip API calls.")
-            similar_papers = DEMO_PAPERS.copy()
-
-        with st.spinner("Computing similarity scores..."):
-            paper_abstracts = [p["abstract"] for p in similar_papers]
-            embeddings = get_batch_embeddings(paper_abstracts)
-            if embeddings:
-                for i, paper in enumerate(similar_papers):
-                    paper["embedding"] = embeddings[i]
-            else:
-                st.error("Failed to generate embeddings for papers.")
-                st.stop()
-
-        def cosine_similarity(a, b):
-            return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
-
-        similarities = []
-        for paper in similar_papers:
-            if paper.get("embedding"):
-                score = cosine_similarity(user_embedding, paper["embedding"])
-                gap_score = max(1.0, min(10.0, 10.0 - (score * 9)))
-                similarities.append((score, gap_score, paper))
-
-        similarities.sort(reverse=True, key=lambda x: x[0])
-        top_papers = similarities[:5]
-
-        st.markdown("---")
-        st.markdown("## Related Manuscripts")
-        st.markdown(f"*Found {len(top_papers)} relevant papers*")
-
-        for idx, (sim_score, gap_score, paper) in enumerate(top_papers):
-            with st.expander(f"{paper['title']}", expanded=(idx == 0)):
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    if paper.get('authors'):
-                        authors_str = ", ".join(paper['authors'][:3])
-                        if len(paper['authors']) > 3:
-                            authors_str += " et al."
-                        st.markdown(f"**Authors:** {authors_str}")
-                    if paper.get('year') or paper.get('venue'):
-                        info = []
-                        if paper.get('year'): info.append(str(paper['year']))
-                        if paper.get('venue'): info.append(paper['venue'])
-                        st.markdown(f"**Published:** {' • '.join(info)}")
-                    st.markdown(f"**Abstract:** {paper['abstract']}")
-                    if paper.get('url'):
-                        st.markdown(f"[🔗 View Original Manuscript]({paper['url']})")
-                with col2:
-                    st.markdown(f"<div class='similarity-score'>Relevance: {sim_score:.1%}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='gap-badge'>Gap Score: {gap_score:.1f}/10</div>", unsafe_allow_html=True)
-
-        st.markdown("---")
-        st.markdown("## ✦ Scholarly Insights")
-        with st.spinner("Composing analysis..."):
-            related_summaries = "\n\n".join([
-                f"**{p['title']}** ({p.get('year', 'N/A')})\n{p['abstract'][:300]}..."
-                for _, _, p in top_papers
-            ])
-            ai_output = analyze_gaps(user_abstract, related_summaries)
-
-        if ai_output:
-            st.markdown(f"<div class='insight-box'>{ai_output}</div>", unsafe_allow_html=True)
-        else:
-            st.error("Failed to generate analysis. Check your API quota.")
-
-st.markdown("---")
-st.markdown("**Scholar's Note:** This tool uses AI to identify research gaps. Always verify findings with domain experts.")
-if not use_demo_mode:
-    st.markdown("**API Notice:** Semantic Scholar has rate limits. Enable Demo Mode if errors occur.")
+    # Research gap analysis
+    st.markdown("<h2>Research Gap Analysis</h2>", unsafe_allow_html=True)
+    with st.spinner("Generating research gap insights..."):
+        analysis = generate_research_gap_analysis(user_input, articles)
+        st.markdown(f"<div class='insight-box'>{analysis}</div>", unsafe_allow_html=True)

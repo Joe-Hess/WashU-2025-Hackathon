@@ -228,3 +228,66 @@ p, span, div {
 .streamlit-expanderContent strong {
     color: #2d2317 !important;
 }
+
+/* --- Global Layout --- */
+body {
+    background-color: #f8fafc;
+    color: #1a1a1a;
+    font-family: "Inter", sans-serif;
+}
+
+/* --- Streamlit overrides --- */
+h1, h2, h3, h4 {
+    font-weight: 600;
+    color: #0f172a;
+}
+.stTextArea textarea {
+    border-radius: 10px;
+    border: 1px solid #cbd5e1;
+}
+
+/* --- Paper Cards --- */
+.paper-card {
+    background-color: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    padding: 20px;
+    margin-bottom: 20px;
+    transition: transform 0.2s ease-in-out;
+}
+.paper-card:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.paper-card h3 {
+    color: #1a1a1a;
+    margin-bottom: 10px;
+}
+.paper-card a {
+    color: #0073e6;
+    text-decoration: none;
+    font-weight: 500;
+}
+.paper-card a:hover {
+    text-decoration: underline;
+}
+.paper-links {
+    margin-top: 10px;
+}
+
+/* --- Analysis Output --- */
+.analysis-box {
+    background-color: #f1f5f9;
+    border-left: 4px solid #0073e6;
+    padding: 20px;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+/* --- Tabs --- */
+[data-testid="stTabs"] button {
+    border-radius: 8px !important;
+    padding: 10px 16px !important;
+    font-weight: 600 !important;
+    color: #0f172a !important;
+}
