@@ -12,7 +12,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def fetch_arxiv_papers(query, max_results=50):
     """Fetch papers from arXiv API"""
-    print(f"🔍 Searching arXiv for: {query}")
+    print(f"Searching arXiv for: {query}")
     
     base_url = "http://export.arxiv.org/api/query?"
     search_query = f"search_query=all:{query}"
@@ -52,12 +52,12 @@ def fetch_arxiv_papers(query, max_results=50):
             "year": year
         })
     
-    print(f"✅ Found {len(papers)} papers")
+    print(f"Found {len(papers)} papers")
     return papers
 
 def embed_papers(papers, batch_size=50):
     """Generate embeddings for papers in batches"""
-    print(f"🧮 Generating embeddings for {len(papers)} papers...")
+    print(f"Generating embeddings for {len(papers)} papers...")
     
     all_embeddings = []
     
@@ -83,7 +83,7 @@ def embed_papers(papers, batch_size=50):
     for i, paper in enumerate(papers):
         paper["embedding"] = all_embeddings[i]
     
-    print("✅ Embeddings generated!")
+    print("Embeddings generated!")
     return papers
 
 def create_paper_database(topic, num_papers=50):
@@ -96,7 +96,7 @@ def create_paper_database(topic, num_papers=50):
     papers = fetch_arxiv_papers(topic, max_results=num_papers)
     
     if not papers:
-        print("❌ No papers found!")
+        print("No papers found!")
         return
     
     # Step 2: Generate embeddings
@@ -112,7 +112,7 @@ def create_paper_database(topic, num_papers=50):
         }, f, indent=2)
     
     print(f"\n{'='*60}")
-    print(f"✅ SUCCESS! Database saved to {filename}")
+    print(f"SUCCESS! Database saved to {filename}")
     print(f"   Topic: {topic}")
     print(f"   Papers: {len(papers)}")
     print(f"{'='*60}\n")
