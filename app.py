@@ -7,7 +7,7 @@ import os
 # -----------------------------
 # PAGE CONFIG
 # -----------------------------
-st.set_page_config(page_title="Research Gap Finder", layout="wide")
+st.set_page_config(page_title="GapFindr.ai", layout="wide")
 
 # Load external CSS
 with open("styles.css") as f:
@@ -120,7 +120,7 @@ def generate_research_gap_analysis(user_text, articles):
 # -----------------------------
 # STREAMLIT APP LAYOUT
 # -----------------------------
-st.markdown("<h1 class='main-header'>Research Gap Finder</h1>", unsafe_allow_html=True)
+st.markdown("<h1 class='main-header'>GapFindr.ai</h1>", unsafe_allow_html=True)
 st.markdown("<p class='subtitle'>Explore PubMed literature, uncover study limitations, and identify how your research can move science forward.</p>", unsafe_allow_html=True)
 
 user_input = st.text_area("Enter your research abstract or idea:", placeholder="Paste your abstract here...", height=200)
@@ -144,7 +144,7 @@ if st.button("Analyze Research Landscape"):
                 st.markdown(f"<div class='paper-card'><strong>Abstract:</strong> {a['abstract']}</div>", unsafe_allow_html=True)
                 if a['doi']:
                     st.markdown(f"**DOI:** [https://doi.org/{a['doi']}](https://doi.org/{a['doi']})")
-                st.markdown(f"<div class='insight-box'><strong>Limitations:</strong> {a['limitations']}</div>", unsafe_allow_html=True)
+                
 
     # Research gap analysis
     st.markdown("<h2>Research Gap Analysis</h2>", unsafe_allow_html=True)
