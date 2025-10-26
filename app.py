@@ -107,6 +107,7 @@ def generate_research_gap_analysis(user_text, articles):
     1. Explain how this abstract fits within the current research landscape.
     2. Identify recurring or notable limitations across the referenced papers.
     3. Suggest how the user's proposed study could advance or refine scientific understanding.
+    4. Provide opportunities for funding agencies to support the user's research. Analyze if the proposed topic is realistically fundable. 
     """
 
     try:
