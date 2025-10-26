@@ -32,8 +32,16 @@ def extract_keywords(text, top_k=5):
 def search_pubmed(query, retmax=7):
     """Search PubMed and return abstracts, DOIs, and attempt to extract limitations."""
     base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
-    search_url = f"{base}esearch.fcgi?db=pubmed&term={quote(query)}&retmax={retmax}&retmode=json"
-    res = requests.get(search_url)
+    search_url = f"{base}esearch.fcgi?db=pubmed&term={quote(query)}&retmax={retmax}&retmode=json&sort=relevance"
+
+    # retry logic
+    for _ in range(3):
+        res = requests.get(search_url)
+        if res.status_code == 200:
+            break
+    else:
+        return []
+
     ids = res.json().get("esearchresult", {}).get("idlist", [])
     if not ids:
         return []
@@ -50,7 +58,6 @@ def search_pubmed(query, retmax=7):
         year_tag = a.find("PubDate")
         year = year_tag.Year.text if year_tag and year_tag.Year else "N/A"
 
-        # Extract DOI and PMC ID
         doi, pmc_id = None, None
         for id_elem in a.find_all("ArticleId"):
             if id_elem.get("IdType") == "doi":
@@ -58,7 +65,6 @@ def search_pubmed(query, retmax=7):
             elif id_elem.get("IdType") == "pmc":
                 pmc_id = id_elem.text
 
-        # Fetch limitations if open-access full text available
         limitations_text = "Limitations not found in abstract or available full text."
         if pmc_id:
             pmc_fetch_url = f"{base}efetch.fcgi?db=pmc&id={pmc_id}&retmode=xml"
@@ -82,6 +88,7 @@ def search_pubmed(query, retmax=7):
         })
 
     return articles
+
 
 
 def generate_research_gap_analysis(user_text, articles):
@@ -117,7 +124,6 @@ def generate_research_gap_analysis(user_text, articles):
     except Exception as e:
         return f"Error generating analysis: {str(e)}"
 
-
 # -----------------------------
 # STREAMLIT APP LAYOUT
 # -----------------------------
@@ -135,6 +141,10 @@ if st.button("Analyze Research Landscape"):
         keywords = extract_keywords(user_input)
         query = " AND ".join(keywords)
         articles = search_pubmed(query)
+
+        if not articles:
+            top_keyword = keywords[0]
+            articles = search_pubmed(top_keyword)
 
     st.markdown("<h2>Existing Research Results</h2>", unsafe_allow_html=True)
     if not articles:
